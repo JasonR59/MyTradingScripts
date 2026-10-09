@@ -1,0 +1,99 @@
+---
+title: "SPX"
+author: "Jason Rodriguez"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(tidyverse)
+library(quantmod)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+
+```
+#SPX Price History
+```{r}
+SPX <- getSymbols("^GSPC", src = "yahoo", auto.assign = FALSE)
+
+SPX.Price <- as.numeric(last(Cl(SPX)))
+```
+#Creates Option Chain 
+```{r}
+Option_Chain <- read.csv("spx_quotedata.csv", skip = 3, header = TRUE, check.names = TRUE)
+```
+#Adds OI and Vol gamma/delta columns for all
+```{r}
+Option_Chain_Math <- Option_Chain %>%
+    mutate(Call.Delta.OI = Delta * Open.Interest * 100, Put.Delta.OI = Delta.1 * Open.Interest.1 * 100, Call.Gamma.OI = Gamma * Open.Interest * 100, Put.Gamma.OI = Gamma.1 * Open.Interest.1 * 100 * -1) %>%
+    mutate(Net.Gex = Call.Gamma.OI + Put.Gamma.OI, Call.Delta.Vol = Delta * Volume * 100, Put.Delta.Vol = Delta.1 * Volume.1 * 100, Call.Gamma.Vol = Gamma * Volume * 100, Put.Gamma.Vol = Gamma.1 * Volume.1 * 100)
+```
+#All by strike
+```{r}
+Expiration.Sum.Simple <- Option_Chain_Math %>%
+         group_by(Strike) %>%
+         summarise(Call.Delta.OI = sum(Call.Delta.OI, na.rm = TRUE),
+                                   Call.Delta.Vol = sum(Call.Delta.Vol, na.rm = TRUE),
+                                   Call.Gamma.OI = sum(Call.Gamma.OI, na.rm = TRUE),
+                                   Call.Gamma.Vol = sum(Call.Gamma.Vol, na.rm = TRUE),
+                                   IV = sum(IV, na.rm = TRUE),
+                                   Open.Interest = sum(Open.Interest, na.rm = TRUE),
+                                   Volume = sum(Volume, na.rm = TRUE),
+                                   Put.Delta.OI = sum(Put.Delta.OI, na.rm = TRUE),
+                                   Put.Delta.Vol = sum(Put.Delta.Vol, na.rm = TRUE),
+                                   Put.Gamma.OI = sum(Put.Gamma.OI, na.rm = TRUE),
+                                   Put.Gamma.Vol = sum(Put.Gamma.Vol, na.rm = TRUE),
+                                   IV.1 = sum(IV.1, na.rm = TRUE),
+                                   Open.Interest.1 = sum(Open.Interest.1, na.rm = TRUE),
+                                   Volume.1 = sum(Volume.1, na.rm = TRUE),
+                                   Net.Gex = sum(Net.Gex, na.rm = TRUE)) %>%
+    ungroup()
+```
+#Most Recent Exp
+```{r}
+Most_Recent <- Option_Chain_Math %>%
+    mutate(Expiration.Date = as.Date(Expiration.Date, format = "%a %b %d %Y")) %>%
+    filter(Expiration.Date == max(Expiration.Date[Expiration.Date <= Sys.Date()], na.rm = TRUE))
+```
+#Most Recent GEX by OI 
+```{r}
+Most_Recent %>%
+    ggplot(aes(y = Strike, x = 0, xend = Net.Gex, yend = Strike)) +
+    geom_segment(aes(x = 0, xend = Call.Gamma.OI, y = Strike, yend = Strike), colour = "blue", linewidth = 2) +
+    geom_segment(aes(x = 0, xend = Put.Gamma.OI, y = Strike, yend = Strike), colour = "red", linewidth = 2) +
+    geom_segment(colour = "orange", linewidth = 2) +
+    geom_vline(xintercept = 0) +
+    geom_hline(yintercept = SPX.Price, colour = "red") +
+    coord_cartesian(ylim = c(SPX.Price - 150, SPX.Price + 150)) +
+    labs(title = "Most Recent Expiration Gamma * OI", x = "Gamma Exposure", y = "Strike") +
+    geom_hline(yintercept = seq(floor((SPX.Price - 150) / 10) * 10, ceiling((SPX.Price + 150) / 10) * 10, by = 10), colour = "gray35", linewidth = 0.125) +
+    geom_hline(yintercept = seq(floor((SPX.Price - 150) / 50) * 50, ceiling((SPX.Price + 150) / 50) * 50, by = 50), colour = "grey1", linewidth = .25) 
+```
+#Most Recent Outliers
+```{r}
+Major_Calls <- Most_Recent %>%
+    slice_max(order_by = abs(Call.Gamma.OI), n = 5) %>%
+    pull(Strike) 
+Major_Calls %>%
+    head()
+Major_Puts <- Most_Recent %>%
+    slice_max(order_by = abs(Put.Gamma.OI), n = 5) %>%
+    pull(Strike) 
+Major_Puts %>%
+    head()
+Major_Net <- Most_Recent %>%
+    slice_max(order_by = abs(Net.Gex), n = 5) %>%
+    pull(Strike)
+  Major_Net %>%
+    head()
+```
+
